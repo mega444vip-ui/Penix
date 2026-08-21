@@ -13,8 +13,9 @@ jobs:
 
       - name: فك ضغط المشروع
         run: |
-          unzip -q PENIX_PROXY.zip -d ./project
-          cp -r ./project/* .
+          unzip -q PENIX_PROXY.zip -d ./temp
+          cp -r ./temp/*/* .
+          ls -la
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
