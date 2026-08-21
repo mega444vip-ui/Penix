@@ -50,15 +50,126 @@ jobs:
       - name: Fix manifest
         run: sed -i 's/package="com\.penix\.proxy"//' app/src/main/AndroidManifest.xml
 
-      - name: Create Shizuku AIDL
+      - name: Create Shizuku Binder interface
         run: |
-          mkdir -p app/src/main/aidl/com/penix/proxy
-          cat > app/src/main/aidl/com/penix/proxy/IFileCopyService.aidl <<'EOF'
+          mkdir -p app/src/main/java/com/penix/proxy
+          rm -rf app/src/main/aidl
+          cat > app/src/main/java/com/penix/proxy/IFileCopyService.java <<'EOF'
           package com.penix.proxy;
 
-          interface IFileCopyService {
-              int copyFiles(String source, String destination);
-              void destroy();
+          import android.os.Binder;
+          import android.os.IBinder;
+          import android.os.IInterface;
+          import android.os.Parcel;
+          import android.os.RemoteException;
+
+          public interface IFileCopyService extends IInterface {
+              int copyFiles(String source, String destination) throws RemoteException;
+              void destroy() throws RemoteException;
+
+              abstract class Stub extends Binder implements IFileCopyService {
+                  private static final String DESCRIPTOR = "com.penix.proxy.IFileCopyService";
+                  private static final int TRANSACTION_copyFiles = IBinder.FIRST_CALL_TRANSACTION;
+                  private static final int TRANSACTION_destroy = IBinder.FIRST_CALL_TRANSACTION + 1;
+                  private static final int SHIZUKU_DESTROY_TRANSACTION = 16777114;
+                  private static final int SHIZUKU_DESTROY_TRANSACTION_ALT = 16777115;
+
+                  public Stub() {
+                      attachInterface(this, DESCRIPTOR);
+                  }
+
+                  public static IFileCopyService asInterface(IBinder obj) {
+                      if (obj == null) return null;
+                      IInterface local = obj.queryLocalInterface(DESCRIPTOR);
+                      if (local instanceof IFileCopyService) return (IFileCopyService) local;
+                      return new Proxy(obj);
+                  }
+
+                  @Override
+                  public IBinder asBinder() {
+                      return this;
+                  }
+
+                  @Override
+                  protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                          throws RemoteException {
+                      if (code == INTERFACE_TRANSACTION) {
+                          reply.writeString(DESCRIPTOR);
+                          return true;
+                      }
+
+                      if (code == SHIZUKU_DESTROY_TRANSACTION ||
+                              code == SHIZUKU_DESTROY_TRANSACTION_ALT) {
+                          destroy();
+                          return true;
+                      }
+
+                      if (code == TRANSACTION_copyFiles) {
+                          data.enforceInterface(DESCRIPTOR);
+                          String source = data.readString();
+                          String destination = data.readString();
+                          int result = copyFiles(source, destination);
+                          if (reply != null) {
+                              reply.writeNoException();
+                              reply.writeInt(result);
+                          }
+                          return true;
+                      }
+
+                      if (code == TRANSACTION_destroy) {
+                          data.enforceInterface(DESCRIPTOR);
+                          destroy();
+                          if (reply != null) reply.writeNoException();
+                          return true;
+                      }
+
+                      return super.onTransact(code, data, reply, flags);
+                  }
+
+                  private static final class Proxy implements IFileCopyService {
+                      private final IBinder remote;
+
+                      Proxy(IBinder remote) {
+                          this.remote = remote;
+                      }
+
+                      @Override
+                      public IBinder asBinder() {
+                          return remote;
+                      }
+
+                      @Override
+                      public int copyFiles(String source, String destination) throws RemoteException {
+                          Parcel data = Parcel.obtain();
+                          Parcel reply = Parcel.obtain();
+                          try {
+                              data.writeInterfaceToken(DESCRIPTOR);
+                              data.writeString(source);
+                              data.writeString(destination);
+                              remote.transact(TRANSACTION_copyFiles, data, reply, 0);
+                              reply.readException();
+                              return reply.readInt();
+                          } finally {
+                              reply.recycle();
+                              data.recycle();
+                          }
+                      }
+
+                      @Override
+                      public void destroy() throws RemoteException {
+                          Parcel data = Parcel.obtain();
+                          Parcel reply = Parcel.obtain();
+                          try {
+                              data.writeInterfaceToken(DESCRIPTOR);
+                              remote.transact(TRANSACTION_destroy, data, reply, 0);
+                              reply.readException();
+                          } finally {
+                              reply.recycle();
+                              data.recycle();
+                          }
+                      }
+                  }
+              }
           }
           EOF
 
@@ -93,7 +204,7 @@ jobs:
                               + " && mkdir -p " + quote(destination)
                               + " && cp -a " + quote(source) + "/. " + quote(destination) + "/";
 
-                      Log.i(TAG, "Executing file replacement");
+                      Log.i(TAG, "Executing file replacement: " + command);
 
                       process = new ProcessBuilder("sh", "-c", command)
                               .redirectErrorStream(true)
@@ -155,7 +266,7 @@ jobs:
               private static final String TAG = "FileManager";
               private static final String GAME_FILES_PATH =
                       "/storage/emulated/0/Android/data/com.dts.freefireth/files";
-              private static final String SERVICE_TAG = "penix-file-copy";
+              private static final String SERVICE_TAG = "penix-file-copy-v4";
 
               public static boolean replaceGameFilesWithShizuku(Context context) {
                   try {
@@ -169,8 +280,6 @@ jobs:
                           return false;
                       }
 
-                      // Do NOT use getCacheDir(): shell cannot normally read /data/user/0/<package>.
-                      // External app-specific storage is on shared storage and is readable by shell.
                       File external = context.getExternalFilesDir(null);
                       if (external == null) {
                           Log.e(TAG, "External storage unavailable");
@@ -197,27 +306,28 @@ jobs:
                       )
                               .daemon(false)
                               .debuggable(true)
-                              .version(3)
+                              .version(4)
                               .tag(SERVICE_TAG)
                               .processNameSuffix("filecopy");
 
                       ServiceConnection connection = new ServiceConnection() {
                           @Override
                           public void onServiceConnected(ComponentName name, IBinder binder) {
+                              Log.i(TAG, "UserService connected");
                               service[0] = IFileCopyService.Stub.asInterface(binder);
                               connected.countDown();
                           }
 
                           @Override
                           public void onServiceDisconnected(ComponentName name) {
-                              connected.countDown();
+                              Log.e(TAG, "UserService disconnected");
                           }
                       };
 
                       Log.i(TAG, "Binding Shizuku UserService");
                       Shizuku.bindUserService(args, connection);
 
-                      if (!connected.await(15, TimeUnit.SECONDS) || service[0] == null) {
+                      if (!connected.await(20, TimeUnit.SECONDS) || service[0] == null) {
                           Log.e(TAG, "UserService connection timeout");
                           Shizuku.unbindUserService(args, connection, true);
                           return false;
@@ -306,9 +416,10 @@ jobs:
           gradle-version: '8.2'
 
       - name: Build APK
-        run: gradle assembleDebug --stacktrace
+        run: gradle clean assembleDebug --stacktrace
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: PENIX_PROXY_APK
