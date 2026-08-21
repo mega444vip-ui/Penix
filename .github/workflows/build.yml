@@ -12,80 +12,43 @@ jobs:
     steps:
 
       # =========================================================
-      # 1. تحميل المشروع
+      # 1. تحميل المستودع
       # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
 
       # =========================================================
-      # 2. فك ZIP
+      # 2. فك PENIX_PROXY.zip
       # =========================================================
       - name: فك ضغط المشروع
         run: |
-          set -e
-
-          echo "===== UNZIP ====="
-
           unzip -q PENIX_PROXY.zip -d ./temp
-
           cp -r ./temp/PENIX_PROXY/. .
 
           echo "===== PROJECT FILES ====="
-
-          find app/src/main -maxdepth 5 -type f | sort || true
+          find app/src/main -maxdepth 5 -type f | sort
 
 
       # =========================================================
-      # 3. إصلاح المشروع بالكامل
+      # 3. إصلاح Gradle
       # =========================================================
-      - name: إصلاح المشروع
+      - name: إصلاح Gradle و Namespace
         run: |
-          set -e
-
-          echo "======================================"
-          echo "        إصلاح مشروع PENIX"
-          echo "======================================"
-
-
-          # -----------------------------------------------------
-          # إنشاء مجلدات المشروع الضرورية
-          # -----------------------------------------------------
-
-          mkdir -p app/src/main/java/com/penix/proxy
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/drawable-mdpi
-          mkdir -p app/src/main/res/drawable-hdpi
-          mkdir -p app/src/main/res/drawable-xhdpi
-          mkdir -p app/src/main/res/drawable-xxhdpi
-          mkdir -p app/src/main/res/drawable-xxxhdpi
-
-
-          # -----------------------------------------------------
-          # إصلاح namespace + minSdk
-          # -----------------------------------------------------
 
           sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
 
-          sed -i -E 's/minSdk([[:space:]]+|[[:space:]]*Version\.)[0-9]+/minSdk 24/g' app/build.gradle
-
-          # إذا لم يجد sed minSdk، نضيفه
-          if ! grep -q "minSdk" app/build.gradle; then
-            sed -i '/defaultConfig {/a\        minSdk 24' app/build.gradle
-          fi
-
+          sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 24/' app/build.gradle
 
           echo "===== BUILD.GRADLE ====="
-
           cat app/build.gradle
 
 
-          # -----------------------------------------------------
-          # إصلاح imports الخاصة بـ Shizuku
-          # -----------------------------------------------------
-
-          echo "===== FIX SHIZUKU IMPORTS ====="
+      # =========================================================
+      # 4. إصلاح imports الخاصة بـ Shizuku
+      # =========================================================
+      - name: إصلاح Shizuku imports
+        run: |
 
           find app/src/main/java \
             -type f \
@@ -108,15 +71,19 @@ jobs:
           done
 
 
-          # -----------------------------------------------------
-          # إنشاء activity_main.xml
-          # -----------------------------------------------------
+      # =========================================================
+      # 5. إنشاء layout إذا لم يكن موجودًا
+      # =========================================================
+      - name: إنشاء Activity Layout
+        run: |
 
-          echo "===== ACTIVITY MAIN ====="
+          mkdir -p app/src/main/res/layout
 
           cat > app/src/main/res/layout/activity_main.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+
+          <FrameLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
               android:layout_height="match_parent">
 
@@ -129,95 +96,62 @@ jobs:
           EOF
 
 
-          # -----------------------------------------------------
-          # إصلاح Manifest
-          # -----------------------------------------------------
+      # =========================================================
+      # 6. إنشاء مجلدات الأيقونة
+      # =========================================================
+      - name: تثبيت أيقونة التطبيق
+        run: |
 
-          echo "===== MANIFEST ====="
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/drawable-mdpi
+          mkdir -p app/src/main/res/drawable-hdpi
+          mkdir -p app/src/main/res/drawable-xhdpi
+          mkdir -p app/src/main/res/drawable-xxhdpi
+          mkdir -p app/src/main/res/drawable-xxxhdpi
+
+          if [ ! -f "ic_launcher.png" ]; then
+            echo "ERROR: ic_launcher.png غير موجود في جذر المشروع"
+            exit 1
+          fi
+
+          cp ic_launcher.png app/src/main/res/drawable/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-mdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-hdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-xhdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-xxhdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-xxxhdpi/ic_launcher.png
+
+
+      # =========================================================
+      # 7. تعديل Manifest
+      # =========================================================
+      - name: إصلاح AndroidManifest
+        run: |
 
           sed -i 's/package="com\.penix\.proxy"//' \
             app/src/main/AndroidManifest.xml
 
-
-          # -----------------------------------------------------
-          # إنشاء الأيقونة في جميع مجلدات drawable
-          # -----------------------------------------------------
-
-          echo "===== ICON ====="
-
-          if [ ! -f "ic_launcher.png" ]; then
-            echo "WARNING: ic_launcher.png غير موجود"
-            echo "سيتم إنشاء أيقونة بسيطة تلقائيا"
-
-            python3 - <<'PY'
-          from PIL import Image, ImageDraw
-
-          size = 512
-
-          img = Image.new("RGBA", (size, size), (20, 20, 20, 255))
-
-          draw = ImageDraw.Draw(img)
-
-          draw.rounded_rectangle(
-              (40, 40, 472, 472),
-              radius=80,
-              fill=(30, 30, 30, 255)
-          )
-
-          draw.text(
-              (145, 215),
-              "P",
-              fill=(255, 255, 255, 255)
-          )
-
-          img.save("ic_launcher.png")
-          PY
-          fi
-
-
-          cp ic_launcher.png \
-            app/src/main/res/drawable/ic_launcher.png
-
-          cp ic_launcher.png \
-            app/src/main/res/drawable-mdpi/ic_launcher.png
-
-          cp ic_launcher.png \
-            app/src/main/res/drawable-hdpi/ic_launcher.png
-
-          cp ic_launcher.png \
-            app/src/main/res/drawable-xhdpi/ic_launcher.png
-
-          cp ic_launcher.png \
-            app/src/main/res/drawable-xxhdpi/ic_launcher.png
-
-          cp ic_launcher.png \
-            app/src/main/res/drawable-xxxhdpi/ic_launcher.png
-
-
-          # -----------------------------------------------------
-          # التأكد من assets/files
-          # -----------------------------------------------------
-
-          echo "===== ASSETS ====="
-
-          if [ ! -d "app/src/main/assets/files" ]; then
-            echo "ERROR: مجلد assets/files غير موجود!"
-            echo ""
-            echo "المطلوب:"
-            echo "app/src/main/assets/files/"
-            echo ""
-            exit 1
-          fi
-
-          echo "assets/files موجود"
+          echo "===== MANIFEST ====="
+          cat app/src/main/AndroidManifest.xml
 
 
       # =========================================================
-      # 4. استبدال FileManager بالكامل
+      # 8. إنشاء FileManager جديد
+      #
+      # لا نستخدم:
+      # Shizuku.newShell()
+      #
+      # ولا:
+      # Shizuku.newProcess()
+      #
+      # لأنهما غير مناسبين لـ API 13.1.5.
+      #
+      # بدلًا من ذلك نستخدم UserService.
       # =========================================================
-      - name: إنشاء FileManager Shizuku
+      - name: إنشاء FileManager
         run: |
-          set -e
+
+          mkdir -p app/src/main/java/com/penix/proxy
 
           cat > app/src/main/java/com/penix/proxy/FileManager.java <<'EOF'
           package com.penix.proxy;
@@ -234,19 +168,29 @@ jobs:
 
           public class FileManager {
 
-              private static final String TAG = "PENIX_FileManager";
+              private static final String TAG = "FileManager";
 
+              /*
+               * مسار ملفات Free Fire
+               */
               private static final String GAME_FILES_PATH =
                       "/storage/emulated/0/Android/data/com.dts.freefireth/files";
 
+              private static final int SHIZUKU_PERMISSION_REQUEST = 1001;
 
+
+              /*
+               * يتم استدعاء هذه الدالة من MainActivity
+               */
               public static boolean replaceGameFilesWithShizuku(Context context) {
 
                   try {
 
-                      // =========================================
-                      // Shizuku
-                      // =========================================
+                      /*
+                       * -------------------------------------------------
+                       * 1. التأكد من أن Shizuku يعمل
+                       * -------------------------------------------------
+                       */
 
                       if (!Shizuku.pingBinder()) {
 
@@ -255,6 +199,12 @@ jobs:
                           return false;
                       }
 
+
+                      /*
+                       * -------------------------------------------------
+                       * 2. التأكد من صلاحية Shizuku
+                       * -------------------------------------------------
+                       */
 
                       if (Shizuku.checkSelfPermission()
                               != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -265,28 +215,22 @@ jobs:
                       }
 
 
-                      // =========================================
-                      // تجهيز الملفات من assets
-                      // =========================================
+                      /*
+                       * -------------------------------------------------
+                       * 3. تجهيز files من assets
+                       * -------------------------------------------------
+                       */
 
                       File tempRoot =
-                              new File(
-                                      context.getCacheDir(),
-                                      "penix_files"
-                              );
-
+                              new File(context.getCacheDir(), "penix_files");
 
                       if (tempRoot.exists()) {
-
-                          deleteLocalFolder(tempRoot);
+                          deleteLocal(tempRoot);
                       }
 
+                      if (!tempRoot.mkdirs()) {
 
-                      if (!tempRoot.mkdirs() &&
-                              !tempRoot.exists()) {
-
-                          Log.e(TAG,
-                                  "فشل إنشاء المجلد المؤقت");
+                          Log.e(TAG, "فشل إنشاء مجلد مؤقت");
 
                           return false;
                       }
@@ -299,88 +243,67 @@ jobs:
                                       tempRoot
                               );
 
-
                       if (!copied) {
 
-                          Log.e(TAG,
-                                  "فشل نسخ assets/files");
+                          Log.e(TAG, "فشل نسخ assets/files");
 
                           return false;
                       }
 
 
-                      // =========================================
-                      // حذف files القديم
-                      // =========================================
+                      /*
+                       * -------------------------------------------------
+                       * 4. تشغيل عملية Shizuku
+                       * -------------------------------------------------
+                       *
+                       * UserService هو الطريقة الصحيحة الحديثة.
+                       */
 
-                      String deleteCommand =
-                              "rm -rf " +
-                              shellQuote(GAME_FILES_PATH);
+                      FileManagerService.setPaths(
+                              tempRoot.getAbsolutePath(),
+                              GAME_FILES_PATH
+                      );
+
+                      FileManagerService.start();
+
+                      /*
+                       * نعطي العملية وقتًا للتنفيذ.
+                       */
+                      Thread.sleep(3000);
 
 
-                      if (!executeCommand(deleteCommand)) {
+                      /*
+                       * -------------------------------------------------
+                       * 5. التحقق
+                       * -------------------------------------------------
+                       */
 
-                          Log.e(TAG,
-                                  "فشل حذف files القديم");
+                      File gameFiles =
+                              new File(GAME_FILES_PATH);
 
-                          return false;
+                      if (gameFiles.exists()) {
+
+                          Log.d(
+                                  TAG,
+                                  "تم تنفيذ عملية الملفات"
+                          );
+
+                          return true;
                       }
 
 
-                      // =========================================
-                      // إنشاء files
-                      // =========================================
+                      Log.e(
+                              TAG,
+                              "مجلد اللعبة غير موجود بعد العملية"
+                      );
 
-                      String mkdirCommand =
-                              "mkdir -p " +
-                              shellQuote(GAME_FILES_PATH);
-
-
-                      if (!executeCommand(mkdirCommand)) {
-
-                          Log.e(TAG,
-                                  "فشل إنشاء مجلد files");
-
-                          return false;
-                      }
-
-
-                      // =========================================
-                      // نسخ الملفات
-                      // =========================================
-
-                      String sourcePath =
-                              tempRoot.getAbsolutePath();
-
-
-                      String copyCommand =
-                              "cp -r " +
-                              shellQuote(sourcePath) +
-                              "/. " +
-                              shellQuote(GAME_FILES_PATH);
-
-
-                      if (!executeCommand(copyCommand)) {
-
-                          Log.e(TAG,
-                                  "فشل نسخ الملفات");
-
-                          return false;
-                      }
-
-
-                      Log.d(TAG,
-                              "تم استبدال files بنجاح");
-
-
-                      return true;
-
+                      return false;
 
                   } catch (Exception e) {
 
                       Log.e(
                               TAG,
-                              "خطأ أثناء الاستبدال",
+                              "فشل استبدال الملفات",
                               e
                       );
 
@@ -389,274 +312,356 @@ jobs:
               }
 
 
-              // =============================================
-              // تنفيذ Shell بواسطة Shizuku
-              // =============================================
-
-              private static boolean executeCommand(
-                      String command) {
-
-                  try {
-
-                      Log.d(TAG,
-                              "Executing: " + command);
-
-
-                      Process process =
-                              Shizuku.newProcess(
-                                      new String[]{
-                                              "sh",
-                                              "-c",
-                                              command
-                                      },
-                                      null,
-                                      null
-                              );
-
-
-                      int exitCode =
-                              process.waitFor();
-
-
-                      Log.d(TAG,
-                              "Exit code: " + exitCode);
-
-
-                      return exitCode == 0;
-
-
-                  } catch (Exception e) {
-
-                      Log.e(
-                              TAG,
-                              "Shell error",
-                              e
-                      );
-
-                      return false;
-                  }
-              }
-
-
-              // =============================================
-              // نسخ assets/files
-              // =============================================
-
+              /*
+               * نسخ assets/files إلى cache
+               */
               private static boolean copyAssetsFolder(
                       Context context,
                       String assetPath,
-                      File destination)
-                      throws IOException {
-
+                      File dest
+              ) throws IOException {
 
                   String[] files =
-                          context.getAssets()
-                                  .list(assetPath);
-
+                          context.getAssets().list(assetPath);
 
                   if (files == null) {
-
                       return false;
                   }
 
-
-                  if (!destination.exists()) {
-
-                      if (!destination.mkdirs() &&
-                              !destination.exists()) {
-
-                          return false;
-                      }
+                  if (!dest.exists()) {
+                      dest.mkdirs();
                   }
 
 
-                  for (String fileName : files) {
+                  for (String name : files) {
 
-                      String fullAssetPath =
-                              assetPath +
-                              "/" +
-                              fileName;
+                      String fullPath =
+                              assetPath + "/" + name;
 
-
-                      String[] subFiles =
-                              context.getAssets()
-                                      .list(fullAssetPath);
+                      String[] children =
+                              context.getAssets().list(fullPath);
 
 
-                      File outputFile =
-                              new File(
-                                      destination,
-                                      fileName
-                              );
+                      if (children != null && children.length > 0) {
 
+                          File directory =
+                                  new File(dest, name);
 
-                      // مجلد
-                      if (subFiles != null &&
-                              subFiles.length > 0) {
-
+                          if (!directory.exists()) {
+                              directory.mkdirs();
+                          }
 
                           if (!copyAssetsFolder(
                                   context,
-                                  fullAssetPath,
-                                  outputFile)) {
+                                  fullPath,
+                                  directory
+                          )) {
 
                               return false;
                           }
 
-
                       } else {
 
-                          // ملف
-
                           InputStream input =
-                                  context.getAssets()
-                                          .open(
-                                                  fullAssetPath
-                                          );
+                                  context.getAssets().open(fullPath);
 
+                          File outputFile =
+                                  new File(dest, name);
 
                           File parent =
-                                  outputFile
-                                          .getParentFile();
+                                  outputFile.getParentFile();
 
-
-                          if (parent != null &&
-                                  !parent.exists()) {
-
+                          if (parent != null) {
                               parent.mkdirs();
                           }
 
-
                           FileOutputStream output =
-                                  new FileOutputStream(
-                                          outputFile
-                                  );
-
+                                  new FileOutputStream(outputFile);
 
                           byte[] buffer =
                                   new byte[8192];
 
+                          int count;
 
-                          int length;
-
-
-                          while ((length =
-                                  input.read(buffer))
-                                  != -1) {
+                          while ((count =
+                                  input.read(buffer)) != -1) {
 
                               output.write(
                                       buffer,
                                       0,
-                                      length
+                                      count
                               );
                           }
-
 
                           output.flush();
 
                           output.close();
-
                           input.close();
                       }
                   }
-
 
                   return true;
               }
 
 
-              // =============================================
-              // حذف مجلد Cache
-              // =============================================
-
-              private static void deleteLocalFolder(
-                      File file) {
-
-
-                  if (file == null ||
-                          !file.exists()) {
-
-                      return;
-                  }
-
+              /*
+               * حذف الملفات المؤقتة فقط.
+               */
+              private static void deleteLocal(File file) {
 
                   if (file.isDirectory()) {
 
                       File[] children =
                               file.listFiles();
 
-
                       if (children != null) {
 
                           for (File child : children) {
-
-                              deleteLocalFolder(child);
+                              deleteLocal(child);
                           }
                       }
                   }
 
-
                   file.delete();
-              }
-
-
-              // =============================================
-              // حماية مسار Shell
-              // =============================================
-
-              private static String shellQuote(
-                      String value) {
-
-                  return "'" +
-                          value.replace(
-                                  "'",
-                                  "'\\''"
-                          ) +
-                          "'";
               }
           }
           EOF
 
 
-          echo "===== FILE MANAGER ====="
-
-          sed -n '1,260p' \
-            app/src/main/java/com/penix/proxy/FileManager.java
-
-
       # =========================================================
-      # 5. التحقق من Shizuku API
+      # 9. إنشاء UserService
       # =========================================================
-      - name: فحص Shizuku API
+      - name: إنشاء FileManagerService
         run: |
-          echo "======================================"
-          echo "       SHIZUKU API INSPECTION"
-          echo "======================================"
 
-          find ~/.gradle/caches \
-            -type f \
-            -name "*.jar" \
-            2>/dev/null |
-          while read jar; do
+          cat > app/src/main/java/com/penix/proxy/FileManagerService.java <<'EOF'
+          package com.penix.proxy;
 
-            if unzip -l "$jar" 2>/dev/null |
-              grep -q "rikka/shizuku/Shizuku.class"; then
+          import android.os.IBinder;
+          import android.util.Log;
 
-              echo ""
-              echo "FOUND:"
-              echo "$jar"
+          import java.io.BufferedReader;
+          import java.io.InputStreamReader;
 
-              unzip -l "$jar" |
-                grep "rikka/shizuku/Shizuku" |
-                head -30
+          import rikka.shizuku.Shizuku;
+          import rikka.shizuku.Shizuku.UserServiceArgs;
 
-            fi
+          public class FileManagerService {
 
-          done
+              private static final String TAG =
+                      "FileManagerService";
+
+              private static String SOURCE;
+              private static String DESTINATION;
+
+
+              public static void setPaths(
+                      String source,
+                      String destination
+              ) {
+
+                  SOURCE = source;
+                  DESTINATION = destination;
+              }
+
+
+              public static void start() {
+
+                  if (!Shizuku.pingBinder()) {
+
+                      Log.e(
+                              TAG,
+                              "Shizuku غير متصل"
+                      );
+
+                      return;
+                  }
+
+
+                  UserServiceArgs args =
+                          new UserServiceArgs(
+                                  new android.content.ComponentName(
+                                          "com.penix.proxy",
+                                          FileCopyUserService.class.getName()
+                                  )
+                          )
+                          .daemon(false)
+                          .debuggable(true)
+                          .version(1)
+                          .processNameSuffix("filecopy");
+
+
+                  Shizuku.bindUserService(
+                          args,
+                          new android.content.ServiceConnection() {
+
+                              @Override
+                              public void onServiceConnected(
+                                      android.content.ComponentName name,
+                                      IBinder service
+                              ) {
+
+                                  Log.d(
+                                          TAG,
+                                          "UserService connected"
+                                  );
+
+                                  FileCopyUserService.execute(
+                                          service,
+                                          SOURCE,
+                                          DESTINATION
+                                  );
+                              }
+
+
+                              @Override
+                              public void onServiceDisconnected(
+                                      android.content.ComponentName name
+                              ) {
+
+                                  Log.d(
+                                          TAG,
+                                          "UserService disconnected"
+                                  );
+                              }
+                          }
+                  );
+              }
+          }
+          EOF
 
 
       # =========================================================
-      # 6. إعداد Java
+      # 10. إنشاء خدمة نسخ الملفات
+      # =========================================================
+      - name: إنشاء FileCopyUserService
+        run: |
+
+          cat > app/src/main/java/com/penix/proxy/FileCopyUserService.java <<'EOF'
+          package com.penix.proxy;
+
+          import android.os.Binder;
+          import android.os.IBinder;
+          import android.util.Log;
+
+          import java.io.BufferedReader;
+          import java.io.InputStreamReader;
+
+          public class FileCopyUserService {
+
+              private static final String TAG =
+                      "FileCopyUserService";
+
+
+              public static void main(String[] args) {
+
+                  /*
+                   * UserService يعمل بصلاحيات Shizuku.
+                   *
+                   * لا نستخدم newProcess().
+                   */
+
+                  Log.d(
+                          TAG,
+                          "FileCopyUserService started"
+                  );
+              }
+
+
+              public static void execute(
+                      IBinder binder,
+                      String source,
+                      String destination
+              ) {
+
+                  new Thread(() -> {
+
+                      try {
+
+                          /*
+                           * نحذف files القديم ثم ننسخ
+                           * الملفات الجديدة.
+                           */
+
+                          String command =
+                                  "rm -rf '" +
+                                  destination +
+                                  "' && " +
+
+                                  "mkdir -p '" +
+                                  destination +
+                                  "' && " +
+
+                                  "cp -r '" +
+                                  source +
+                                  "/.' '" +
+                                  destination +
+                                  "/'";
+
+
+                          Log.d(
+                                  TAG,
+                                  "Executing: " + command
+                          );
+
+
+                          Process process =
+                                  Runtime.getRuntime().exec(
+                                          new String[]{
+                                                  "sh",
+                                                  "-c",
+                                                  command
+                                          }
+                                  );
+
+
+                          BufferedReader reader =
+                                  new BufferedReader(
+                                          new InputStreamReader(
+                                                  process.getInputStream()
+                                          )
+                                  );
+
+
+                          String line;
+
+                          while ((line =
+                                  reader.readLine()) != null) {
+
+                              Log.d(
+                                      TAG,
+                                      line
+                              );
+                          }
+
+
+                          int result =
+                                  process.waitFor();
+
+
+                          Log.d(
+                                  TAG,
+                                  "Result = " + result
+                          );
+
+
+                      } catch (Exception e) {
+
+                          Log.e(
+                                  TAG,
+                                  "File copy failed",
+                                  e
+                          );
+                      }
+
+                  }).start();
+              }
+          }
+          EOF
+
+
+      # =========================================================
+      # 11. إعداد JDK
       # =========================================================
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -666,7 +671,7 @@ jobs:
 
 
       # =========================================================
-      # 7. إعداد Gradle
+      # 12. Gradle
       # =========================================================
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -675,18 +680,39 @@ jobs:
 
 
       # =========================================================
-      # 8. بناء APK
+      # 13. gradle.properties
+      # =========================================================
+      - name: إصلاح compileSdk warning
+        run: |
+
+          touch gradle.properties
+
+          if ! grep -q \
+            "android.suppressUnsupportedCompileSdk" \
+            gradle.properties; then
+
+            echo \
+            "android.suppressUnsupportedCompileSdk=34" \
+            >> gradle.properties
+
+          fi
+
+
+      # =========================================================
+      # 14. Build
       # =========================================================
       - name: Build APK
         run: |
+
           gradle assembleDebug --stacktrace
 
 
       # =========================================================
-      # 9. رفع APK
+      # 15. رفع APK
       # =========================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: PENIX_PROXY_APK
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
