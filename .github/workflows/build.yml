@@ -91,9 +91,9 @@ jobs:
         with:
           gradle-version: '8.2'
 
-      - name: تنزيل dependencies
+      - name: تهيئة مشروع Gradle
         run: |
-          gradle dependencies --configuration debugCompileClasspath
+          gradle tasks --all
 
       - name: فحص Shizuku API
         run: |
