@@ -23,7 +23,7 @@ jobs:
           echo "===== إصلاح build.gradle ====="
 
           sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
-          sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 23/' app/build.gradle
+          sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 24/' app/build.gradle
 
           echo "===== إنشاء activity_main.xml ====="
 
@@ -50,7 +50,7 @@ jobs:
           echo "===== activity_main.xml ====="
           cat app/src/main/res/layout/activity_main.xml
 
-          echo "===== build.gradle ====="
+          echo "===== app/build.gradle ====="
           cat app/build.gradle
 
           echo "===== AndroidManifest.xml ====="
