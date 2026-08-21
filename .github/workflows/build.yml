@@ -16,16 +16,19 @@ jobs:
         run: |
           unzip -q PENIX_PROXY.zip -d ./temp
           cp -r ./temp/PENIX_PROXY/. .
-          ls -la
+          echo "===== PROJECT ====="
+          find app/src/main -maxdepth 4 -type f | sort
 
-      - name: إصلاح ملفات المشروع
+      - name: إصلاح المشروع
         run: |
-          echo "===== إصلاح build.gradle ====="
+          echo "===== BUILD.GRADLE ====="
 
           sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
           sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 24/' app/build.gradle
 
-          echo "===== إصلاح Imports الخاصة بـ Shizuku ====="
+          cat app/build.gradle
+
+          echo "===== SHIZUKU IMPORTS ====="
 
           find app/src/main/java -type f -name "*.java" -print0 | while IFS= read -r -d '' file; do
             sed -i 's/import moe\.shizuku\.Shizuku;/import rikka.shizuku.Shizuku;/' "$file"
@@ -33,7 +36,7 @@ jobs:
             sed -i 's/import moe\.shizuku\.ShizukuBinderWrapper;/import rikka.shizuku.ShizukuBinderWrapper;/' "$file"
           done
 
-          echo "===== إنشاء activity_main.xml ====="
+          echo "===== ACTIVITY MAIN ====="
 
           mkdir -p app/src/main/res/layout
 
@@ -51,11 +54,12 @@ jobs:
           </FrameLayout>
           EOF
 
-          echo "===== إصلاح AndroidManifest.xml ====="
+          echo "===== MANIFEST ====="
 
-          sed -i 's/package="com\.penix\.proxy"//' app/src/main/AndroidManifest.xml
+          sed -i 's/package="com\.penix\.proxy"//' \
+            app/src/main/AndroidManifest.xml
 
-          echo "===== إنشاء مجلدات الأيقونات ====="
+          echo "===== ICON DIRECTORIES ====="
 
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/drawable-mdpi
@@ -65,7 +69,7 @@ jobs:
           mkdir -p app/src/main/res/drawable-xxxhdpi
 
           if [ ! -f "ic_launcher.png" ]; then
-            echo "ERROR: ic_launcher.png غير موجود!"
+            echo "ERROR: ic_launcher.png غير موجود في جذر المشروع"
             exit 1
           fi
 
@@ -75,245 +79,6 @@ jobs:
           cp ic_launcher.png app/src/main/res/drawable-xhdpi/ic_launcher.png
           cp ic_launcher.png app/src/main/res/drawable-xxhdpi/ic_launcher.png
           cp ic_launcher.png app/src/main/res/drawable-xxxhdpi/ic_launcher.png
-
-          echo "===== إصلاح FileManager.java ====="
-
-          cat > app/src/main/java/com/penix/proxy/FileManager.java <<'EOF'
-          package com.penix.proxy;
-
-          import android.content.Context;
-          import android.util.Log;
-
-          import java.io.File;
-          import java.io.FileOutputStream;
-          import java.io.IOException;
-          import java.io.InputStream;
-
-          import rikka.shizuku.Shizuku;
-
-          public class FileManager {
-
-              private static final String GAME_FILES_PATH =
-                      "/storage/emulated/0/Android/data/com.dts.freefireth/files/";
-
-              public static boolean replaceGameFilesWithShizuku(Context context) {
-                  try {
-
-                      String tempPath =
-                              context.getCacheDir() + "/files/";
-
-                      if (!copyAssetsFolder(context, "files", tempPath)) {
-                          Log.e("FileManager", "فشل نسخ الملفات من assets");
-                          return false;
-                      }
-
-                      if (!Shizuku.pingBinder()) {
-                          Log.e("FileManager", "Shizuku غير مفعل");
-                          return false;
-                      }
-
-                      File sourceDir = new File(tempPath);
-                      File targetDir = new File(GAME_FILES_PATH);
-
-                      if (!sourceDir.exists()) {
-                          Log.e("FileManager", "المجلد المؤقت غير موجود");
-                          return false;
-                      }
-
-                      if (!targetDir.exists()) {
-                          if (!targetDir.mkdirs()) {
-                              Log.e("FileManager", "فشل إنشاء مجلد اللعبة");
-                              return false;
-                          }
-                      }
-
-                      /*
-                       * ملاحظة:
-                       * Shizuku.newShell() غير موجود في API 13.1.5.
-                       *
-                       * يتم هنا الاعتماد على صلاحيات Shizuku للوصول
-                       * إلى ملفات اللعبة، مع تنفيذ النسخ عبر Java.
-                       */
-
-                      if (!deleteDirectory(targetDir)) {
-                          Log.e("FileManager", "فشل حذف المجلد القديم");
-                          return false;
-                      }
-
-                      if (!copyDirectory(sourceDir, targetDir)) {
-                          Log.e("FileManager", "فشل نسخ المجلد الجديد");
-                          return false;
-                      }
-
-                      Log.d("FileManager", "تم استبدال الملفات بنجاح");
-                      return true;
-
-                  } catch (Exception e) {
-                      Log.e(
-                              "FileManager",
-                              "فشل استبدال الملفات: " + e.getMessage(),
-                              e
-                      );
-                      return false;
-                  }
-              }
-
-              private static boolean deleteDirectory(File directory) {
-
-                  if (!directory.exists()) {
-                      return true;
-                  }
-
-                  File[] files = directory.listFiles();
-
-                  if (files != null) {
-                      for (File file : files) {
-                          if (file.isDirectory()) {
-                              if (!deleteDirectory(file)) {
-                                  return false;
-                              }
-                          } else {
-                              if (!file.delete()) {
-                                  return false;
-                              }
-                          }
-                      }
-                  }
-
-                  return directory.delete();
-              }
-
-              private static boolean copyDirectory(File source, File destination)
-                      throws IOException {
-
-                  if (source.isDirectory()) {
-
-                      if (!destination.exists() && !destination.mkdirs()) {
-                          return false;
-                      }
-
-                      File[] files = source.listFiles();
-
-                      if (files != null) {
-                          for (File file : files) {
-
-                              File target =
-                                      new File(destination, file.getName());
-
-                              if (file.isDirectory()) {
-                                  if (!copyDirectory(file, target)) {
-                                      return false;
-                                  }
-                              } else {
-                                  copyFile(file, target);
-                              }
-                          }
-                      }
-
-                  } else {
-                      copyFile(source, destination);
-                  }
-
-                  return true;
-              }
-
-              private static void copyFile(File source, File destination)
-                      throws IOException {
-
-                  destination.getParentFile().mkdirs();
-
-                  java.io.FileInputStream input =
-                          new java.io.FileInputStream(source);
-
-                  FileOutputStream output =
-                          new FileOutputStream(destination);
-
-                  byte[] buffer = new byte[8192];
-
-                  int length;
-
-                  while ((length = input.read(buffer)) != -1) {
-                      output.write(buffer, 0, length);
-                  }
-
-                  input.close();
-                  output.close();
-              }
-
-              private static boolean copyAssetsFolder(
-                      Context context,
-                      String assetPath,
-                      String destPath
-              ) throws IOException {
-
-                  String[] files =
-                          context.getAssets().list(assetPath);
-
-                  if (files == null) {
-                      return false;
-                  }
-
-                  for (String file : files) {
-
-                      String childPath =
-                              assetPath + "/" + file;
-
-                      String[] subFiles =
-                              context.getAssets().list(childPath);
-
-                      if (subFiles != null && subFiles.length > 0) {
-
-                          File subDir =
-                                  new File(destPath, file);
-
-                          if (!subDir.exists()) {
-                              subDir.mkdirs();
-                          }
-
-                          if (!copyAssetsFolder(
-                                  context,
-                                  childPath,
-                                  destPath + "/" + file
-                          )) {
-                              return false;
-                          }
-
-                      } else {
-
-                          InputStream in =
-                                  context.getAssets().open(childPath);
-
-                          File outFile =
-                                  new File(destPath, file);
-
-                          outFile.getParentFile().mkdirs();
-
-                          FileOutputStream out =
-                                  new FileOutputStream(outFile);
-
-                          byte[] buffer = new byte[4096];
-
-                          int read;
-
-                          while ((read = in.read(buffer)) != -1) {
-                              out.write(buffer, 0, read);
-                          }
-
-                          in.close();
-                          out.close();
-                      }
-                  }
-
-                  return true;
-              }
-          }
-          EOF
-
-          echo "===== التحقق من ملفات Java ====="
-          grep -R "moe.shizuku" app/src/main/java || true
-          grep -R "Shizuku.newShell" app/src/main/java || true
-
-          echo "===== الإصلاحات انتهت ====="
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -325,6 +90,47 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.2'
+
+      - name: تنزيل dependencies
+        run: |
+          gradle dependencies --configuration debugCompileClasspath
+
+      - name: فحص Shizuku API
+        run: |
+          echo "======================================"
+          echo "       SHIZUKU API INSPECTION"
+          echo "======================================"
+
+          find ~/.gradle/caches \
+            -type f \
+            \( -name "*.jar" -o -name "*.aar" \) \
+            2>/dev/null \
+            | grep -i shizuku \
+            | head -100
+
+          echo "===== CLASSES ====="
+
+          find ~/.gradle/caches \
+            -type f \
+            -name "*.jar" \
+            2>/dev/null \
+            | while read jar; do
+
+              if unzip -l "$jar" 2>/dev/null \
+                | grep -q "rikka/shizuku/Shizuku.class"; then
+
+                echo ""
+                echo "FOUND SHIZUKU:"
+                echo "$jar"
+                echo ""
+
+                unzip -l "$jar" \
+                  | grep "rikka/shizuku/" \
+                  | head -200
+
+              fi
+
+          done
 
       - name: Build APK
         run: gradle assembleDebug
