@@ -47,14 +47,40 @@ jobs:
 
           sed -i 's/package="com\.penix\.proxy"//' app/src/main/AndroidManifest.xml
 
+          echo "===== إنشاء مجلدات الأيقونات ====="
+
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/drawable-mdpi
+          mkdir -p app/src/main/res/drawable-hdpi
+          mkdir -p app/src/main/res/drawable-xhdpi
+          mkdir -p app/src/main/res/drawable-xxhdpi
+          mkdir -p app/src/main/res/drawable-xxxhdpi
+
+          echo "===== التحقق من الأيقونة ====="
+
+          if [ ! -f "ic_launcher.png" ]; then
+            echo "ERROR: ic_launcher.png غير موجود في جذر المشروع!"
+            exit 1
+          fi
+
+          echo "===== نسخ ic_launcher.png ====="
+
+          cp ic_launcher.png app/src/main/res/drawable/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-mdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-hdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-xhdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-xxhdpi/ic_launcher.png
+          cp ic_launcher.png app/src/main/res/drawable-xxxhdpi/ic_launcher.png
+
+          echo "===== الملفات التي تم إنشاؤها ====="
+
+          find app/src/main/res -type f -name "ic_launcher.png"
+
           echo "===== activity_main.xml ====="
           cat app/src/main/res/layout/activity_main.xml
 
           echo "===== app/build.gradle ====="
           cat app/build.gradle
-
-          echo "===== AndroidManifest.xml ====="
-          cat app/src/main/AndroidManifest.xml
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
