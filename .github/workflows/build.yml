@@ -18,6 +18,11 @@ jobs:
           cp -r ./temp/PENIX_PROXY/. .
           ls -la
 
+      - name: إصلاح namespace
+        run: |
+          sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
+          cat app/build.gradle
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
