@@ -10,35 +10,109 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
 
+      # =========================================================
+      # 1. تحميل المشروع
+      # =========================================================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # =========================================================
+      # 2. فك ZIP
+      # =========================================================
       - name: فك ضغط المشروع
         run: |
-          unzip -q PENIX_PROXY.zip -d ./temp
-          cp -r ./temp/PENIX_PROXY/. .
-          echo "===== PROJECT ====="
-          find app/src/main -maxdepth 4 -type f | sort
+          set -e
 
+          echo "===== UNZIP ====="
+
+          unzip -q PENIX_PROXY.zip -d ./temp
+
+          cp -r ./temp/PENIX_PROXY/. .
+
+          echo "===== PROJECT FILES ====="
+
+          find app/src/main -maxdepth 5 -type f | sort || true
+
+
+      # =========================================================
+      # 3. إصلاح المشروع بالكامل
+      # =========================================================
       - name: إصلاح المشروع
         run: |
-          echo "===== BUILD.GRADLE ====="
+          set -e
+
+          echo "======================================"
+          echo "        إصلاح مشروع PENIX"
+          echo "======================================"
+
+
+          # -----------------------------------------------------
+          # إنشاء مجلدات المشروع الضرورية
+          # -----------------------------------------------------
+
+          mkdir -p app/src/main/java/com/penix/proxy
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/drawable-mdpi
+          mkdir -p app/src/main/res/drawable-hdpi
+          mkdir -p app/src/main/res/drawable-xhdpi
+          mkdir -p app/src/main/res/drawable-xxhdpi
+          mkdir -p app/src/main/res/drawable-xxxhdpi
+
+
+          # -----------------------------------------------------
+          # إصلاح namespace + minSdk
+          # -----------------------------------------------------
 
           sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
-          sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 24/' app/build.gradle
+
+          sed -i -E 's/minSdk([[:space:]]+|[[:space:]]*Version\.)[0-9]+/minSdk 24/g' app/build.gradle
+
+          # إذا لم يجد sed minSdk، نضيفه
+          if ! grep -q "minSdk" app/build.gradle; then
+            sed -i '/defaultConfig {/a\        minSdk 24' app/build.gradle
+          fi
+
+
+          echo "===== BUILD.GRADLE ====="
 
           cat app/build.gradle
 
-          echo "===== SHIZUKU IMPORTS ====="
 
-          find app/src/main/java -type f -name "*.java" -print0 | while IFS= read -r -d '' file; do
-            sed -i 's/import moe\.shizuku\.Shizuku;/import rikka.shizuku.Shizuku;/' "$file"
-            sed -i 's/import moe\.shizuku\.ShizukuProvider;/import rikka.shizuku.ShizukuProvider;/' "$file"
-            sed -i 's/import moe\.shizuku\.ShizukuBinderWrapper;/import rikka.shizuku.ShizukuBinderWrapper;/' "$file"
+          # -----------------------------------------------------
+          # إصلاح imports الخاصة بـ Shizuku
+          # -----------------------------------------------------
+
+          echo "===== FIX SHIZUKU IMPORTS ====="
+
+          find app/src/main/java \
+            -type f \
+            -name "*.java" \
+            -print0 |
+          while IFS= read -r -d '' file; do
+
+            sed -i \
+              's/import moe\.shizuku\.Shizuku;/import rikka.shizuku.Shizuku;/' \
+              "$file"
+
+            sed -i \
+              's/import moe\.shizuku\.ShizukuProvider;/import rikka.shizuku.ShizukuProvider;/' \
+              "$file"
+
+            sed -i \
+              's/import moe\.shizuku\.ShizukuBinderWrapper;/import rikka.shizuku.ShizukuBinderWrapper;/' \
+              "$file"
+
           done
 
-          echo "===== ACTIVITY MAIN ====="
 
-          mkdir -p app/src/main/res/layout
+          # -----------------------------------------------------
+          # إنشاء activity_main.xml
+          # -----------------------------------------------------
+
+          echo "===== ACTIVITY MAIN ====="
 
           cat > app/src/main/res/layout/activity_main.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -54,47 +128,505 @@ jobs:
           </FrameLayout>
           EOF
 
+
+          # -----------------------------------------------------
+          # إصلاح Manifest
+          # -----------------------------------------------------
+
           echo "===== MANIFEST ====="
 
           sed -i 's/package="com\.penix\.proxy"//' \
             app/src/main/AndroidManifest.xml
 
-          echo "===== ICON DIRECTORIES ====="
 
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/drawable-mdpi
-          mkdir -p app/src/main/res/drawable-hdpi
-          mkdir -p app/src/main/res/drawable-xhdpi
-          mkdir -p app/src/main/res/drawable-xxhdpi
-          mkdir -p app/src/main/res/drawable-xxxhdpi
+          # -----------------------------------------------------
+          # إنشاء الأيقونة في جميع مجلدات drawable
+          # -----------------------------------------------------
+
+          echo "===== ICON ====="
 
           if [ ! -f "ic_launcher.png" ]; then
-            echo "ERROR: ic_launcher.png غير موجود في جذر المشروع"
+            echo "WARNING: ic_launcher.png غير موجود"
+            echo "سيتم إنشاء أيقونة بسيطة تلقائيا"
+
+            python3 - <<'PY'
+          from PIL import Image, ImageDraw
+
+          size = 512
+
+          img = Image.new("RGBA", (size, size), (20, 20, 20, 255))
+
+          draw = ImageDraw.Draw(img)
+
+          draw.rounded_rectangle(
+              (40, 40, 472, 472),
+              radius=80,
+              fill=(30, 30, 30, 255)
+          )
+
+          draw.text(
+              (145, 215),
+              "P",
+              fill=(255, 255, 255, 255)
+          )
+
+          img.save("ic_launcher.png")
+          PY
+          fi
+
+
+          cp ic_launcher.png \
+            app/src/main/res/drawable/ic_launcher.png
+
+          cp ic_launcher.png \
+            app/src/main/res/drawable-mdpi/ic_launcher.png
+
+          cp ic_launcher.png \
+            app/src/main/res/drawable-hdpi/ic_launcher.png
+
+          cp ic_launcher.png \
+            app/src/main/res/drawable-xhdpi/ic_launcher.png
+
+          cp ic_launcher.png \
+            app/src/main/res/drawable-xxhdpi/ic_launcher.png
+
+          cp ic_launcher.png \
+            app/src/main/res/drawable-xxxhdpi/ic_launcher.png
+
+
+          # -----------------------------------------------------
+          # التأكد من assets/files
+          # -----------------------------------------------------
+
+          echo "===== ASSETS ====="
+
+          if [ ! -d "app/src/main/assets/files" ]; then
+            echo "ERROR: مجلد assets/files غير موجود!"
+            echo ""
+            echo "المطلوب:"
+            echo "app/src/main/assets/files/"
+            echo ""
             exit 1
           fi
 
-          cp ic_launcher.png app/src/main/res/drawable/ic_launcher.png
-          cp ic_launcher.png app/src/main/res/drawable-mdpi/ic_launcher.png
-          cp ic_launcher.png app/src/main/res/drawable-hdpi/ic_launcher.png
-          cp ic_launcher.png app/src/main/res/drawable-xhdpi/ic_launcher.png
-          cp ic_launcher.png app/src/main/res/drawable-xxhdpi/ic_launcher.png
-          cp ic_launcher.png app/src/main/res/drawable-xxxhdpi/ic_launcher.png
+          echo "assets/files موجود"
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.2'
-
-      - name: تهيئة مشروع Gradle
+      # =========================================================
+      # 4. استبدال FileManager بالكامل
+      # =========================================================
+      - name: إنشاء FileManager Shizuku
         run: |
-          gradle tasks --all
+          set -e
 
+          cat > app/src/main/java/com/penix/proxy/FileManager.java <<'EOF'
+          package com.penix.proxy;
+
+          import android.content.Context;
+          import android.util.Log;
+
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.IOException;
+          import java.io.InputStream;
+
+          import rikka.shizuku.Shizuku;
+
+          public class FileManager {
+
+              private static final String TAG = "PENIX_FileManager";
+
+              private static final String GAME_FILES_PATH =
+                      "/storage/emulated/0/Android/data/com.dts.freefireth/files";
+
+
+              public static boolean replaceGameFilesWithShizuku(Context context) {
+
+                  try {
+
+                      // =========================================
+                      // Shizuku
+                      // =========================================
+
+                      if (!Shizuku.pingBinder()) {
+
+                          Log.e(TAG, "Shizuku غير مفعل");
+
+                          return false;
+                      }
+
+
+                      if (Shizuku.checkSelfPermission()
+                              != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+
+                          Log.e(TAG, "صلاحية Shizuku غير ممنوحة");
+
+                          return false;
+                      }
+
+
+                      // =========================================
+                      // تجهيز الملفات من assets
+                      // =========================================
+
+                      File tempRoot =
+                              new File(
+                                      context.getCacheDir(),
+                                      "penix_files"
+                              );
+
+
+                      if (tempRoot.exists()) {
+
+                          deleteLocalFolder(tempRoot);
+                      }
+
+
+                      if (!tempRoot.mkdirs() &&
+                              !tempRoot.exists()) {
+
+                          Log.e(TAG,
+                                  "فشل إنشاء المجلد المؤقت");
+
+                          return false;
+                      }
+
+
+                      boolean copied =
+                              copyAssetsFolder(
+                                      context,
+                                      "files",
+                                      tempRoot
+                              );
+
+
+                      if (!copied) {
+
+                          Log.e(TAG,
+                                  "فشل نسخ assets/files");
+
+                          return false;
+                      }
+
+
+                      // =========================================
+                      // حذف files القديم
+                      // =========================================
+
+                      String deleteCommand =
+                              "rm -rf " +
+                              shellQuote(GAME_FILES_PATH);
+
+
+                      if (!executeCommand(deleteCommand)) {
+
+                          Log.e(TAG,
+                                  "فشل حذف files القديم");
+
+                          return false;
+                      }
+
+
+                      // =========================================
+                      // إنشاء files
+                      // =========================================
+
+                      String mkdirCommand =
+                              "mkdir -p " +
+                              shellQuote(GAME_FILES_PATH);
+
+
+                      if (!executeCommand(mkdirCommand)) {
+
+                          Log.e(TAG,
+                                  "فشل إنشاء مجلد files");
+
+                          return false;
+                      }
+
+
+                      // =========================================
+                      // نسخ الملفات
+                      // =========================================
+
+                      String sourcePath =
+                              tempRoot.getAbsolutePath();
+
+
+                      String copyCommand =
+                              "cp -r " +
+                              shellQuote(sourcePath) +
+                              "/. " +
+                              shellQuote(GAME_FILES_PATH);
+
+
+                      if (!executeCommand(copyCommand)) {
+
+                          Log.e(TAG,
+                                  "فشل نسخ الملفات");
+
+                          return false;
+                      }
+
+
+                      Log.d(TAG,
+                              "تم استبدال files بنجاح");
+
+
+                      return true;
+
+
+                  } catch (Exception e) {
+
+                      Log.e(
+                              TAG,
+                              "خطأ أثناء الاستبدال",
+                              e
+                      );
+
+                      return false;
+                  }
+              }
+
+
+              // =============================================
+              // تنفيذ Shell بواسطة Shizuku
+              // =============================================
+
+              private static boolean executeCommand(
+                      String command) {
+
+                  try {
+
+                      Log.d(TAG,
+                              "Executing: " + command);
+
+
+                      Process process =
+                              Shizuku.newProcess(
+                                      new String[]{
+                                              "sh",
+                                              "-c",
+                                              command
+                                      },
+                                      null,
+                                      null
+                              );
+
+
+                      int exitCode =
+                              process.waitFor();
+
+
+                      Log.d(TAG,
+                              "Exit code: " + exitCode);
+
+
+                      return exitCode == 0;
+
+
+                  } catch (Exception e) {
+
+                      Log.e(
+                              TAG,
+                              "Shell error",
+                              e
+                      );
+
+                      return false;
+                  }
+              }
+
+
+              // =============================================
+              // نسخ assets/files
+              // =============================================
+
+              private static boolean copyAssetsFolder(
+                      Context context,
+                      String assetPath,
+                      File destination)
+                      throws IOException {
+
+
+                  String[] files =
+                          context.getAssets()
+                                  .list(assetPath);
+
+
+                  if (files == null) {
+
+                      return false;
+                  }
+
+
+                  if (!destination.exists()) {
+
+                      if (!destination.mkdirs() &&
+                              !destination.exists()) {
+
+                          return false;
+                      }
+                  }
+
+
+                  for (String fileName : files) {
+
+                      String fullAssetPath =
+                              assetPath +
+                              "/" +
+                              fileName;
+
+
+                      String[] subFiles =
+                              context.getAssets()
+                                      .list(fullAssetPath);
+
+
+                      File outputFile =
+                              new File(
+                                      destination,
+                                      fileName
+                              );
+
+
+                      // مجلد
+                      if (subFiles != null &&
+                              subFiles.length > 0) {
+
+
+                          if (!copyAssetsFolder(
+                                  context,
+                                  fullAssetPath,
+                                  outputFile)) {
+
+                              return false;
+                          }
+
+
+                      } else {
+
+                          // ملف
+
+                          InputStream input =
+                                  context.getAssets()
+                                          .open(
+                                                  fullAssetPath
+                                          );
+
+
+                          File parent =
+                                  outputFile
+                                          .getParentFile();
+
+
+                          if (parent != null &&
+                                  !parent.exists()) {
+
+                              parent.mkdirs();
+                          }
+
+
+                          FileOutputStream output =
+                                  new FileOutputStream(
+                                          outputFile
+                                  );
+
+
+                          byte[] buffer =
+                                  new byte[8192];
+
+
+                          int length;
+
+
+                          while ((length =
+                                  input.read(buffer))
+                                  != -1) {
+
+                              output.write(
+                                      buffer,
+                                      0,
+                                      length
+                              );
+                          }
+
+
+                          output.flush();
+
+                          output.close();
+
+                          input.close();
+                      }
+                  }
+
+
+                  return true;
+              }
+
+
+              // =============================================
+              // حذف مجلد Cache
+              // =============================================
+
+              private static void deleteLocalFolder(
+                      File file) {
+
+
+                  if (file == null ||
+                          !file.exists()) {
+
+                      return;
+                  }
+
+
+                  if (file.isDirectory()) {
+
+                      File[] children =
+                              file.listFiles();
+
+
+                      if (children != null) {
+
+                          for (File child : children) {
+
+                              deleteLocalFolder(child);
+                          }
+                      }
+                  }
+
+
+                  file.delete();
+              }
+
+
+              // =============================================
+              // حماية مسار Shell
+              // =============================================
+
+              private static String shellQuote(
+                      String value) {
+
+                  return "'" +
+                          value.replace(
+                                  "'",
+                                  "'\\''"
+                          ) +
+                          "'";
+              }
+          }
+          EOF
+
+
+          echo "===== FILE MANAGER ====="
+
+          sed -n '1,260p' \
+            app/src/main/java/com/penix/proxy/FileManager.java
+
+
+      # =========================================================
+      # 5. التحقق من Shizuku API
+      # =========================================================
       - name: فحص Shizuku API
         run: |
           echo "======================================"
@@ -103,38 +635,56 @@ jobs:
 
           find ~/.gradle/caches \
             -type f \
-            \( -name "*.jar" -o -name "*.aar" \) \
-            2>/dev/null \
-            | grep -i shizuku \
-            | head -100
-
-          echo "===== CLASSES ====="
-
-          find ~/.gradle/caches \
-            -type f \
             -name "*.jar" \
-            2>/dev/null \
-            | while read jar; do
+            2>/dev/null |
+          while read jar; do
 
-              if unzip -l "$jar" 2>/dev/null \
-                | grep -q "rikka/shizuku/Shizuku.class"; then
+            if unzip -l "$jar" 2>/dev/null |
+              grep -q "rikka/shizuku/Shizuku.class"; then
 
-                echo ""
-                echo "FOUND SHIZUKU:"
-                echo "$jar"
-                echo ""
+              echo ""
+              echo "FOUND:"
+              echo "$jar"
 
-                unzip -l "$jar" \
-                  | grep "rikka/shizuku/" \
-                  | head -200
+              unzip -l "$jar" |
+                grep "rikka/shizuku/Shizuku" |
+                head -30
 
-              fi
+            fi
 
           done
 
-      - name: Build APK
-        run: gradle assembleDebug
 
+      # =========================================================
+      # 6. إعداد Java
+      # =========================================================
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+
+      # =========================================================
+      # 7. إعداد Gradle
+      # =========================================================
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+
+      # =========================================================
+      # 8. بناء APK
+      # =========================================================
+      - name: Build APK
+        run: |
+          gradle assembleDebug --stacktrace
+
+
+      # =========================================================
+      # 9. رفع APK
+      # =========================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
