@@ -25,6 +25,17 @@ jobs:
           sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
           sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 24/' app/build.gradle
 
+          echo "===== إصلاح Imports الخاصة بـ Shizuku ====="
+
+          find app/src/main/java -type f -name "*.java" -print0 | while IFS= read -r -d '' file; do
+            sed -i 's/import moe\.shizuku\.Shizuku;/import rikka.shizuku.Shizuku;/' "$file"
+            sed -i 's/import moe\.shizuku\.ShizukuProvider;/import rikka.shizuku.ShizukuProvider;/' "$file"
+            sed -i 's/import moe\.shizuku\.ShizukuBinderWrapper;/import rikka.shizuku.ShizukuBinderWrapper;/' "$file"
+          done
+
+          echo "===== البحث عن Imports قديمة متبقية ====="
+          grep -R "moe.shizuku" app/src/main/java || true
+
           echo "===== إنشاء activity_main.xml ====="
 
           mkdir -p app/src/main/res/layout
@@ -56,14 +67,14 @@ jobs:
           mkdir -p app/src/main/res/drawable-xxhdpi
           mkdir -p app/src/main/res/drawable-xxxhdpi
 
-          echo "===== التحقق من الأيقونة ====="
+          echo "===== التحقق من ic_launcher.png ====="
 
           if [ ! -f "ic_launcher.png" ]; then
             echo "ERROR: ic_launcher.png غير موجود في جذر المشروع!"
             exit 1
           fi
 
-          echo "===== نسخ ic_launcher.png ====="
+          echo "===== نسخ الأيقونة ====="
 
           cp ic_launcher.png app/src/main/res/drawable/ic_launcher.png
           cp ic_launcher.png app/src/main/res/drawable-mdpi/ic_launcher.png
@@ -72,14 +83,18 @@ jobs:
           cp ic_launcher.png app/src/main/res/drawable-xxhdpi/ic_launcher.png
           cp ic_launcher.png app/src/main/res/drawable-xxxhdpi/ic_launcher.png
 
-          echo "===== الملفات التي تم إنشاؤها ====="
+          echo "===== التحقق النهائي ====="
 
+          echo "--- Shizuku imports ---"
+          grep -R "rikka.shizuku" app/src/main/java || true
+
+          echo "--- Icons ---"
           find app/src/main/res -type f -name "ic_launcher.png"
 
-          echo "===== activity_main.xml ====="
+          echo "--- activity_main.xml ---"
           cat app/src/main/res/layout/activity_main.xml
 
-          echo "===== app/build.gradle ====="
+          echo "--- build.gradle ---"
           cat app/build.gradle
 
       - name: Set up JDK 17
