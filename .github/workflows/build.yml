@@ -14,46 +14,41 @@ jobs:
 
       - name: Extract project
         run: |
-          rm -rf ./temp
-          unzip -q PENIX_PROXY.zip -d ./temp
-          cp -r ./temp/PENIX_PROXY/. .
+          rm -rf temp
+          unzip -q PENIX_PROXY.zip -d temp
+          cp -a temp/PENIX_PROXY/. .
 
-      - name: Fix Gradle and Shizuku imports
+      - name: Prepare Android project
+        shell: bash
         run: |
+          set -e
           sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
           sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 24/' app/build.gradle
-          find app/src/main/java -type f -name '*.java' -print0 | while IFS= read -r -d '' file; do
-            sed -i 's/import moe\.shizuku\.Shizuku;/import rikka.shizuku.Shizuku;/' "$file"
-            sed -i 's/import moe\.shizuku\.ShizukuProvider;/import rikka.shizuku.ShizukuProvider;/' "$file"
-            sed -i 's/import moe\.shizuku\.ShizukuBinderWrapper;/import rikka.shizuku.ShizukuBinderWrapper;/' "$file"
+          sed -i '/package="com\.penix\.proxy"/s/ package="com\.penix\.proxy"//' app/src/main/AndroidManifest.xml || true
+          grep -q 'dev.rikka.shizuku:api:13.1.5' app/build.gradle || sed -i '/dependencies {/a\    implementation "dev.rikka.shizuku:api:13.1.5"\n    implementation "dev.rikka.shizuku:provider:13.1.5"' app/build.gradle
+          find app/src/main/java -type f -name '*.java' -print0 | while IFS= read -r -d '' f; do
+            sed -i 's/import moe\.shizuku\.Shizuku;/import rikka.shizuku.Shizuku;/' "$f"
+            sed -i 's/import moe\.shizuku\.ShizukuProvider;/import rikka.shizuku.ShizukuProvider;/' "$f"
+            sed -i 's/import moe\.shizuku\.ShizukuBinderWrapper;/import rikka.shizuku.ShizukuBinderWrapper;/' "$f"
           done
-
-      - name: Create layout and icon
-        run: |
+          rm -f app/src/main/java/com/penix/proxy/FileCopyUserService.java
+          rm -f app/src/main/java/com/penix/proxy/IFileCopyService.java
+          rm -f app/src/main/java/com/penix/proxy/FileManager.java
           mkdir -p app/src/main/res/layout
           cat > app/src/main/res/layout/activity_main.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent">
-              <WebView
-                  android:id="@+id/webview"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent" />
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent">
+              <WebView android:id="@+id/webview" android:layout_width="match_parent" android:layout_height="match_parent" />
           </FrameLayout>
           EOF
-          for dir in drawable drawable-mdpi drawable-hdpi drawable-xhdpi drawable-xxhdpi drawable-xxxhdpi; do
-            mkdir -p "app/src/main/res/$dir"
-            cp ic_launcher.png "app/src/main/res/$dir/ic_launcher.png"
+          for d in drawable drawable-mdpi drawable-hdpi drawable-xhdpi drawable-xxhdpi drawable-xxxhdpi; do
+            mkdir -p "app/src/main/res/$d"
+            cp -f ic_launcher.png "app/src/main/res/$d/ic_launcher.png"
           done
 
-      - name: Fix manifest
-        run: sed -i 's/package="com\.penix\.proxy"//' app/src/main/AndroidManifest.xml
-
-      - name: Create Shizuku Binder interface
+      - name: Create Shizuku binder interface
+        shell: bash
         run: |
-          mkdir -p app/src/main/java/com/penix/proxy
-          rm -rf app/src/main/aidl
           cat > app/src/main/java/com/penix/proxy/IFileCopyService.java <<'EOF'
           package com.penix.proxy;
 
@@ -65,115 +60,68 @@ jobs:
 
           public interface IFileCopyService extends IInterface {
               int copyFiles(String source, String destination) throws RemoteException;
-              void destroy() throws RemoteException;
 
               abstract class Stub extends Binder implements IFileCopyService {
                   private static final String DESCRIPTOR = "com.penix.proxy.IFileCopyService";
-                  private static final int TRANSACTION_copyFiles = IBinder.FIRST_CALL_TRANSACTION;
-                  private static final int TRANSACTION_destroy = IBinder.FIRST_CALL_TRANSACTION + 1;
-                  private static final int SHIZUKU_DESTROY_TRANSACTION = 16777114;
-                  private static final int SHIZUKU_DESTROY_TRANSACTION_ALT = 16777115;
+                  private static final int TRANSACTION_COPY = IBinder.FIRST_CALL_TRANSACTION;
+                  private static final int DESTROY_AIDL = 16777114;
+                  private static final int DESTROY = 16777115;
 
-                  public Stub() {
-                      attachInterface(this, DESCRIPTOR);
-                  }
+                  public Stub() { attachInterface(this, DESCRIPTOR); }
 
-                  public static IFileCopyService asInterface(IBinder obj) {
-                      if (obj == null) return null;
-                      IInterface local = obj.queryLocalInterface(DESCRIPTOR);
+                  public static IFileCopyService asInterface(IBinder binder) {
+                      if (binder == null) return null;
+                      IInterface local = binder.queryLocalInterface(DESCRIPTOR);
                       if (local instanceof IFileCopyService) return (IFileCopyService) local;
-                      return new Proxy(obj);
+                      return new Proxy(binder);
                   }
 
-                  @Override
-                  public IBinder asBinder() {
-                      return this;
-                  }
+                  @Override public IBinder asBinder() { return this; }
 
-                  @Override
-                  protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
-                          throws RemoteException {
+                  @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
                       if (code == INTERFACE_TRANSACTION) {
                           reply.writeString(DESCRIPTOR);
                           return true;
                       }
-
-                      if (code == SHIZUKU_DESTROY_TRANSACTION ||
-                              code == SHIZUKU_DESTROY_TRANSACTION_ALT) {
+                      if (code == DESTROY_AIDL || code == DESTROY) {
                           destroy();
                           return true;
                       }
-
-                      if (code == TRANSACTION_copyFiles) {
+                      if (code == TRANSACTION_COPY) {
                           data.enforceInterface(DESCRIPTOR);
-                          String source = data.readString();
-                          String destination = data.readString();
-                          int result = copyFiles(source, destination);
-                          if (reply != null) {
-                              reply.writeNoException();
-                              reply.writeInt(result);
-                          }
+                          int result = copyFiles(data.readString(), data.readString());
+                          reply.writeNoException();
+                          reply.writeInt(result);
                           return true;
                       }
-
-                      if (code == TRANSACTION_destroy) {
-                          data.enforceInterface(DESCRIPTOR);
-                          destroy();
-                          if (reply != null) reply.writeNoException();
-                          return true;
-                      }
-
                       return super.onTransact(code, data, reply, flags);
                   }
 
                   private static final class Proxy implements IFileCopyService {
                       private final IBinder remote;
-
-                      Proxy(IBinder remote) {
-                          this.remote = remote;
-                      }
-
-                      @Override
-                      public IBinder asBinder() {
-                          return remote;
-                      }
-
-                      @Override
-                      public int copyFiles(String source, String destination) throws RemoteException {
+                      Proxy(IBinder remote) { this.remote = remote; }
+                      @Override public IBinder asBinder() { return remote; }
+                      @Override public int copyFiles(String source, String destination) throws RemoteException {
                           Parcel data = Parcel.obtain();
                           Parcel reply = Parcel.obtain();
                           try {
                               data.writeInterfaceToken(DESCRIPTOR);
                               data.writeString(source);
                               data.writeString(destination);
-                              remote.transact(TRANSACTION_copyFiles, data, reply, 0);
+                              remote.transact(TRANSACTION_COPY, data, reply, 0);
                               reply.readException();
                               return reply.readInt();
-                          } finally {
-                              reply.recycle();
-                              data.recycle();
-                          }
-                      }
-
-                      @Override
-                      public void destroy() throws RemoteException {
-                          Parcel data = Parcel.obtain();
-                          Parcel reply = Parcel.obtain();
-                          try {
-                              data.writeInterfaceToken(DESCRIPTOR);
-                              remote.transact(TRANSACTION_destroy, data, reply, 0);
-                              reply.readException();
-                          } finally {
-                              reply.recycle();
-                              data.recycle();
-                          }
+                          } finally { reply.recycle(); data.recycle(); }
                       }
                   }
               }
+
+              default void destroy() throws RemoteException {}
           }
           EOF
 
-      - name: Create privileged UserService
+      - name: Create privileged Shizuku UserService
+        shell: bash
         run: |
           cat > app/src/main/java/com/penix/proxy/FileCopyUserService.java <<'EOF'
           package com.penix.proxy;
@@ -181,67 +129,50 @@ jobs:
           import android.content.Context;
           import android.os.RemoteException;
           import android.util.Log;
-
           import java.io.BufferedReader;
           import java.io.InputStreamReader;
 
           public class FileCopyUserService extends IFileCopyService.Stub {
               private static final String TAG = "PenixFileService";
 
-              public FileCopyUserService() {
-                  Log.i(TAG, "UserService started");
-              }
+              public FileCopyUserService() { Log.i(TAG, "started"); }
 
-              public FileCopyUserService(Context context) {
-                  Log.i(TAG, "UserService started with Context");
-              }
+              @androidx.annotation.Keep
+              public FileCopyUserService(Context context) { Log.i(TAG, "started with context"); }
 
-              @Override
-              public int copyFiles(String source, String destination) throws RemoteException {
+              @Override public int copyFiles(String source, String destination) throws RemoteException {
                   Process process = null;
                   try {
-                      String command = "rm -rf " + quote(destination)
-                              + " && mkdir -p " + quote(destination)
-                              + " && cp -a " + quote(source) + "/. " + quote(destination) + "/";
-
-                      Log.i(TAG, "Executing file replacement: " + command);
-
-                      process = new ProcessBuilder("sh", "-c", command)
-                              .redirectErrorStream(true)
-                              .start();
-
-                      BufferedReader reader = new BufferedReader(
-                              new InputStreamReader(process.getInputStream())
-                      );
+                      String qsrc = quote(source);
+                      String qdst = quote(destination);
+                      String command = "rm -rf " + qdst + " && mkdir -p " + qdst + " && cp -a " + qsrc + "/. " + qdst + "/";
+                      Log.i(TAG, "command=" + command);
+                      process = new ProcessBuilder("sh", "-c", command).redirectErrorStream(true).start();
+                      BufferedReader r = new BufferedReader(new InputStreamReader(process.getInputStream()));
                       String line;
-                      while ((line = reader.readLine()) != null) {
-                          Log.i(TAG, line);
-                      }
-
+                      while ((line = r.readLine()) != null) Log.i(TAG, line);
                       int result = process.waitFor();
-                      Log.i(TAG, "copy result=" + result);
+                      Log.i(TAG, "exit=" + result);
                       return result;
-                  } catch (Throwable e) {
-                      Log.e(TAG, "copyFiles failed", e);
+                  } catch (Throwable t) {
+                      Log.e(TAG, "copy failed", t);
                       return -1;
                   } finally {
                       if (process != null) process.destroy();
                   }
               }
 
-              private static String quote(String value) {
-                  return "'" + value.replace("'", "'\\''") + "'";
-              }
+              private static String quote(String s) { return "'" + s.replace("'", "'\\''") + "'"; }
 
-              @Override
-              public void destroy() {
-                  Log.i(TAG, "UserService destroyed");
+              @Override public void destroy() {
+                  Log.i(TAG, "destroy");
                   System.exit(0);
               }
           }
           EOF
 
       - name: Create FileManager
+        shell: bash
         run: |
           cat > app/src/main/java/com/penix/proxy/FileManager.java <<'EOF'
           package com.penix.proxy;
@@ -252,163 +183,106 @@ jobs:
           import android.content.pm.PackageManager;
           import android.os.IBinder;
           import android.util.Log;
-
           import java.io.File;
           import java.io.FileOutputStream;
           import java.io.IOException;
           import java.io.InputStream;
           import java.util.concurrent.CountDownLatch;
           import java.util.concurrent.TimeUnit;
-
           import rikka.shizuku.Shizuku;
 
-          public class FileManager {
-              private static final String TAG = "FileManager";
-              private static final String GAME_FILES_PATH =
-                      "/storage/emulated/0/Android/data/com.dts.freefireth/files";
-              private static final String SERVICE_TAG = "penix-file-copy-v4";
+          public final class FileManager {
+              private static final String TAG = "PenixFileManager";
+              private static final String GAME = "/storage/emulated/0/Android/data/com.dts.freefireth/files";
 
               public static boolean replaceGameFilesWithShizuku(Context context) {
+                  File source = null;
                   try {
-                      if (!Shizuku.pingBinder()) {
-                          Log.e(TAG, "Shizuku is not running");
-                          return false;
-                      }
+                      if (!Shizuku.pingBinder()) { Log.e(TAG, "Shizuku not running"); return false; }
+                      if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) { Log.e(TAG, "Shizuku permission missing"); return false; }
 
-                      if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                          Log.e(TAG, "Shizuku permission is not granted");
-                          return false;
-                      }
-
-                      File external = context.getExternalFilesDir(null);
-                      if (external == null) {
-                          Log.e(TAG, "External storage unavailable");
-                          return false;
-                      }
-
-                      File source = new File(external, "penix_files");
+                      File base = context.getExternalFilesDir(null);
+                      if (base == null) return false;
+                      source = new File(base, "penix_files");
                       deleteLocal(source);
-                      if (!source.mkdirs() && !source.isDirectory()) {
-                          Log.e(TAG, "Cannot create source: " + source);
-                          return false;
-                      }
+                      if (!source.mkdirs() && !source.isDirectory()) return false;
+                      if (!copyAssetsFolder(context, "files", source)) { Log.e(TAG, "assets/files copy failed"); return false; }
 
-                      if (!copyAssetsFolder(context, "files", source)) {
-                          Log.e(TAG, "Cannot copy assets/files");
-                          return false;
-                      }
-
-                      final CountDownLatch connected = new CountDownLatch(1);
-                      final IFileCopyService[] service = new IFileCopyService[1];
-
-                      Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
-                              new ComponentName(context.getPackageName(), FileCopyUserService.class.getName())
-                      )
-                              .daemon(false)
-                              .debuggable(true)
-                              .version(4)
-                              .tag(SERVICE_TAG)
-                              .processNameSuffix("filecopy");
-
-                      ServiceConnection connection = new ServiceConnection() {
-                          @Override
-                          public void onServiceConnected(ComponentName name, IBinder binder) {
-                              Log.i(TAG, "UserService connected");
-                              service[0] = IFileCopyService.Stub.asInterface(binder);
-                              connected.countDown();
+                      final CountDownLatch latch = new CountDownLatch(1);
+                      final IFileCopyService[] remote = new IFileCopyService[1];
+                      final Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(new ComponentName(context, FileCopyUserService.class))
+                              .daemon(false).debuggable(true).version(1).tag("penix-file-copy").processNameSuffix("filecopy");
+                      final ServiceConnection connection = new ServiceConnection() {
+                          @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+                              remote[0] = IFileCopyService.Stub.asInterface(binder);
+                              latch.countDown();
                           }
-
-                          @Override
-                          public void onServiceDisconnected(ComponentName name) {
-                              Log.e(TAG, "UserService disconnected");
-                          }
+                          @Override public void onServiceDisconnected(ComponentName name) { Log.e(TAG, "UserService disconnected"); }
                       };
 
-                      Log.i(TAG, "Binding Shizuku UserService");
                       Shizuku.bindUserService(args, connection);
-
-                      if (!connected.await(20, TimeUnit.SECONDS) || service[0] == null) {
-                          Log.e(TAG, "UserService connection timeout");
+                      if (!latch.await(20, TimeUnit.SECONDS) || remote[0] == null) {
+                          Log.e(TAG, "UserService timeout");
                           Shizuku.unbindUserService(args, connection, true);
                           return false;
                       }
 
-                      int result = service[0].copyFiles(
-                              source.getAbsolutePath(),
-                              GAME_FILES_PATH
-                      );
-
+                      int result = remote[0].copyFiles(source.getAbsolutePath(), GAME);
                       Shizuku.unbindUserService(args, connection, true);
-
-                      if (result != 0) {
-                          Log.e(TAG, "File replacement failed, exit=" + result);
-                          return false;
-                      }
-
-                      File destination = new File(GAME_FILES_PATH);
-                      boolean success = destination.isDirectory();
-                      Log.i(TAG, "File replacement success=" + success);
-                      return success;
-                  } catch (Throwable e) {
-                      Log.e(TAG, "Failed to replace files", e);
+                      if (result != 0) { Log.e(TAG, "copy exit=" + result); return false; }
+                      boolean ok = new File(GAME).isDirectory();
+                      Log.i(TAG, "replacement=" + ok);
+                      return ok;
+                  } catch (Throwable t) {
+                      Log.e(TAG, "replacement failed", t);
                       return false;
                   }
               }
 
-              private static boolean copyAssetsFolder(Context context, String assetPath, File destination)
-                      throws IOException {
-                  String[] entries = context.getAssets().list(assetPath);
-                  if (entries == null) return false;
-
-                  for (String name : entries) {
-                      String fullPath = assetPath + "/" + name;
-                      String[] children = context.getAssets().list(fullPath);
-
+              private static boolean copyAssetsFolder(Context c, String path, File dst) throws IOException {
+                  String[] list = c.getAssets().list(path);
+                  if (list == null) return false;
+                  for (String name : list) {
+                      String full = path + "/" + name;
+                      String[] children = c.getAssets().list(full);
+                      File out = new File(dst, name);
                       if (children != null && children.length > 0) {
-                          File dir = new File(destination, name);
-                          if (!dir.exists() && !dir.mkdirs()) return false;
-                          if (!copyAssetsFolder(context, fullPath, dir)) return false;
+                          if (!out.exists() && !out.mkdirs()) return false;
+                          if (!copyAssetsFolder(c, full, out)) return false;
                       } else {
-                          File output = new File(destination, name);
-                          File parent = output.getParentFile();
-                          if (parent != null && !parent.exists() && !parent.mkdirs()) return false;
-
-                          try (InputStream input = context.getAssets().open(fullPath);
-                               FileOutputStream out = new FileOutputStream(output)) {
-                              byte[] buffer = new byte[8192];
-                              int count;
-                              while ((count = input.read(buffer)) != -1) {
-                                  out.write(buffer, 0, count);
-                              }
+                          File p = out.getParentFile();
+                          if (p != null && !p.exists() && !p.mkdirs()) return false;
+                          try (InputStream in = c.getAssets().open(full); FileOutputStream fos = new FileOutputStream(out)) {
+                              byte[] b = new byte[8192]; int n;
+                              while ((n = in.read(b)) != -1) fos.write(b, 0, n);
                           }
                       }
                   }
                   return true;
               }
 
-              private static void deleteLocal(File file) {
-                  if (!file.exists()) return;
-                  if (file.isDirectory()) {
-                      File[] children = file.listFiles();
-                      if (children != null) {
-                          for (File child : children) deleteLocal(child);
-                      }
-                  }
-                  file.delete();
+              private static void deleteLocal(File f) {
+                  if (!f.exists()) return;
+                  if (f.isDirectory()) { File[] a = f.listFiles(); if (a != null) for (File x : a) deleteLocal(x); }
+                  f.delete();
               }
           }
           EOF
 
-      - name: Ensure Shizuku dependencies
+      - name: Verify source before build
         run: |
-          grep -q 'dev.rikka.shizuku:api:13.1.5' app/build.gradle || \
-            sed -i '/dependencies {/a\    implementation "dev.rikka.shizuku:api:13.1.5"\n    implementation "dev.rikka.shizuku:provider:13.1.5"' app/build.gradle
+          set -e
+          ! grep -R 'newProcess(' app/src/main/java || true
+          test -f app/src/main/java/com/penix/proxy/FileManager.java
+          test -f app/src/main/java/com/penix/proxy/FileCopyUserService.java
+          test -f app/src/main/java/com/penix/proxy/IFileCopyService.java
+          grep -R 'rikka.shizuku.Shizuku' app/src/main/java
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
