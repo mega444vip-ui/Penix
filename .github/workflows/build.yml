@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,14 +17,11 @@ jobs:
           rm -rf ./temp
           unzip -q PENIX_PROXY.zip -d ./temp
           cp -r ./temp/PENIX_PROXY/. .
-          echo "===== PROJECT ====="
-          find app/src/main -maxdepth 5 -type f | sort
 
       - name: Fix Gradle and Shizuku imports
         run: |
           sed -i '/android {/a\    namespace "com.penix.proxy"' app/build.gradle
           sed -i 's/minSdk[[:space:]]*[0-9]*/minSdk 24/' app/build.gradle
-
           find app/src/main/java -type f -name '*.java' -print0 | while IFS= read -r -d '' file; do
             sed -i 's/import moe\.shizuku\.Shizuku;/import rikka.shizuku.Shizuku;/' "$file"
             sed -i 's/import moe\.shizuku\.ShizukuProvider;/import rikka.shizuku.ShizukuProvider;/' "$file"
@@ -46,19 +42,15 @@ jobs:
                   android:layout_height="match_parent" />
           </FrameLayout>
           EOF
-
           for dir in drawable drawable-mdpi drawable-hdpi drawable-xhdpi drawable-xxhdpi drawable-xxxhdpi; do
             mkdir -p "app/src/main/res/$dir"
             cp ic_launcher.png "app/src/main/res/$dir/ic_launcher.png"
           done
 
       - name: Fix manifest
-        run: |
-          sed -i 's/package="com\.penix\.proxy"//' app/src/main/AndroidManifest.xml
-          echo "===== MANIFEST ====="
-          cat app/src/main/AndroidManifest.xml
+        run: sed -i 's/package="com\.penix\.proxy"//' app/src/main/AndroidManifest.xml
 
-      - name: Create Shizuku AIDL interface
+      - name: Create Shizuku AIDL
         run: |
           mkdir -p app/src/main/aidl/com/penix/proxy
           cat > app/src/main/aidl/com/penix/proxy/IFileCopyService.aidl <<'EOF'
@@ -66,12 +58,12 @@ jobs:
 
           interface IFileCopyService {
               int copyFiles(String source, String destination);
+              void destroy();
           }
           EOF
 
-      - name: Create FileCopyUserService
+      - name: Create privileged UserService
         run: |
-          mkdir -p app/src/main/java/com/penix/proxy
           cat > app/src/main/java/com/penix/proxy/FileCopyUserService.java <<'EOF'
           package com.penix.proxy;
 
@@ -82,36 +74,26 @@ jobs:
           import java.io.BufferedReader;
           import java.io.InputStreamReader;
 
-          import androidx.annotation.Keep;
-
           public class FileCopyUserService extends IFileCopyService.Stub {
-
               private static final String TAG = "PenixFileService";
 
               public FileCopyUserService() {
                   Log.i(TAG, "UserService started");
               }
 
-              @Keep
               public FileCopyUserService(Context context) {
-                  Log.i(TAG, "UserService started with context");
+                  Log.i(TAG, "UserService started with Context");
               }
 
               @Override
               public int copyFiles(String source, String destination) throws RemoteException {
                   Process process = null;
                   try {
-                      String safeSource = shellQuote(source);
-                      String safeDestination = shellQuote(destination);
+                      String command = "rm -rf " + quote(destination)
+                              + " && mkdir -p " + quote(destination)
+                              + " && cp -a " + quote(source) + "/. " + quote(destination) + "/";
 
-                      // The source is placed in app-specific EXTERNAL storage,
-                      // which is visible to the Shizuku shell process.
-                      String command =
-                              "rm -rf " + safeDestination +
-                              " && mkdir -p " + safeDestination +
-                              " && cp -a " + safeSource + "/. " + safeDestination + "/";
-
-                      Log.i(TAG, "Running file replacement");
+                      Log.i(TAG, "Executing file replacement");
 
                       process = new ProcessBuilder("sh", "-c", command)
                               .redirectErrorStream(true)
@@ -120,7 +102,6 @@ jobs:
                       BufferedReader reader = new BufferedReader(
                               new InputStreamReader(process.getInputStream())
                       );
-
                       String line;
                       while ((line = reader.readLine()) != null) {
                           Log.i(TAG, line);
@@ -129,18 +110,15 @@ jobs:
                       int result = process.waitFor();
                       Log.i(TAG, "copy result=" + result);
                       return result;
-
                   } catch (Throwable e) {
                       Log.e(TAG, "copyFiles failed", e);
                       return -1;
                   } finally {
-                      if (process != null) {
-                          process.destroy();
-                      }
+                      if (process != null) process.destroy();
                   }
               }
 
-              private static String shellQuote(String value) {
+              private static String quote(String value) {
                   return "'" + value.replace("'", "'\\''") + "'";
               }
 
@@ -162,7 +140,6 @@ jobs:
           import android.content.ServiceConnection;
           import android.content.pm.PackageManager;
           import android.os.IBinder;
-          import android.os.RemoteException;
           import android.util.Log;
 
           import java.io.File;
@@ -171,17 +148,13 @@ jobs:
           import java.io.InputStream;
           import java.util.concurrent.CountDownLatch;
           import java.util.concurrent.TimeUnit;
-          import java.util.concurrent.atomic.AtomicInteger;
 
           import rikka.shizuku.Shizuku;
 
           public class FileManager {
-
               private static final String TAG = "FileManager";
-
               private static final String GAME_FILES_PATH =
                       "/storage/emulated/0/Android/data/com.dts.freefireth/files";
-
               private static final String SERVICE_TAG = "penix-file-copy";
 
               public static boolean replaceGameFilesWithShizuku(Context context) {
@@ -196,20 +169,18 @@ jobs:
                           return false;
                       }
 
-                      // IMPORTANT: do not use internal cache here.
-                      // Shell UID cannot normally read /data/user/0/<package>.
-                      // Use the app-specific EXTERNAL directory instead.
+                      // Do NOT use getCacheDir(): shell cannot normally read /data/user/0/<package>.
+                      // External app-specific storage is on shared storage and is readable by shell.
                       File external = context.getExternalFilesDir(null);
                       if (external == null) {
-                          Log.e(TAG, "External storage is unavailable");
+                          Log.e(TAG, "External storage unavailable");
                           return false;
                       }
 
                       File source = new File(external, "penix_files");
                       deleteLocal(source);
-
                       if (!source.mkdirs() && !source.isDirectory()) {
-                          Log.e(TAG, "Cannot create source directory: " + source);
+                          Log.e(TAG, "Cannot create source: " + source);
                           return false;
                       }
 
@@ -219,25 +190,21 @@ jobs:
                       }
 
                       final CountDownLatch connected = new CountDownLatch(1);
-                      final AtomicInteger result = new AtomicInteger(-1000);
-                      final IFileCopyService[] remote = new IFileCopyService[1];
+                      final IFileCopyService[] service = new IFileCopyService[1];
 
                       Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
-                              new ComponentName(
-                                      context.getPackageName(),
-                                      FileCopyUserService.class.getName()
-                              )
+                              new ComponentName(context.getPackageName(), FileCopyUserService.class.getName())
                       )
                               .daemon(false)
                               .debuggable(true)
-                              .version(2)
+                              .version(3)
                               .tag(SERVICE_TAG)
                               .processNameSuffix("filecopy");
 
                       ServiceConnection connection = new ServiceConnection() {
                           @Override
                           public void onServiceConnected(ComponentName name, IBinder binder) {
-                              remote[0] = IFileCopyService.Stub.asInterface(binder);
+                              service[0] = IFileCopyService.Stub.asInterface(binder);
                               connected.countDown();
                           }
 
@@ -250,42 +217,36 @@ jobs:
                       Log.i(TAG, "Binding Shizuku UserService");
                       Shizuku.bindUserService(args, connection);
 
-                      if (!connected.await(15, TimeUnit.SECONDS) || remote[0] == null) {
-                          Log.e(TAG, "Shizuku UserService connection timeout");
+                      if (!connected.await(15, TimeUnit.SECONDS) || service[0] == null) {
+                          Log.e(TAG, "UserService connection timeout");
                           Shizuku.unbindUserService(args, connection, true);
                           return false;
                       }
 
-                      result.set(remote[0].copyFiles(
+                      int result = service[0].copyFiles(
                               source.getAbsolutePath(),
                               GAME_FILES_PATH
-                      ));
+                      );
 
                       Shizuku.unbindUserService(args, connection, true);
 
-                      if (result.get() != 0) {
-                          Log.e(TAG, "File replacement failed, exit=" + result.get());
+                      if (result != 0) {
+                          Log.e(TAG, "File replacement failed, exit=" + result);
                           return false;
                       }
 
                       File destination = new File(GAME_FILES_PATH);
-                      boolean success = destination.isDirectory() &&
-                              destination.list() != null;
-
+                      boolean success = destination.isDirectory();
                       Log.i(TAG, "File replacement success=" + success);
                       return success;
-
                   } catch (Throwable e) {
                       Log.e(TAG, "Failed to replace files", e);
                       return false;
                   }
               }
 
-              private static boolean copyAssetsFolder(
-                      Context context,
-                      String assetPath,
-                      File destination
-              ) throws IOException {
+              private static boolean copyAssetsFolder(Context context, String assetPath, File destination)
+                      throws IOException {
                   String[] entries = context.getAssets().list(assetPath);
                   if (entries == null) return false;
 
@@ -328,13 +289,10 @@ jobs:
           }
           EOF
 
-      - name: Ensure Shizuku dependency
+      - name: Ensure Shizuku dependencies
         run: |
-          if ! grep -q "dev.rikka.shizuku:api:13.1.5" app/build.gradle; then
+          grep -q 'dev.rikka.shizuku:api:13.1.5' app/build.gradle || \
             sed -i '/dependencies {/a\    implementation "dev.rikka.shizuku:api:13.1.5"\n    implementation "dev.rikka.shizuku:provider:13.1.5"' app/build.gradle
-          fi
-          echo "===== FINAL BUILD.GRADLE ====="
-          cat app/build.gradle
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
